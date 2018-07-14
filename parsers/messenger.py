@@ -7,6 +7,7 @@ import argparse
 import pandas as pd
 from langdetect import *
 from lxml import etree
+import json
 
 from parsers import log
 from parsers import utils, config
@@ -34,82 +35,106 @@ def main():
 
     # make sure we don't crash if chat logs contain exotic characters
     etree.set_default_parser(etree.XMLParser(encoding='utf-8', ns_clean=True, recover=True))
+    for root, dirs, files in os.walk(args.file_path):
+        #print((len(path) - 1) * '---', os.path.basename(root))
+        for filename in files:
+            #print("found file" , files)
+            if not filename.endswith('.json'):
+                continue
 
-    for filename in os.listdir(args.file_path):
+            #print("found file")
+            document = os.path.join(root, filename)
+            with open(document) as f:
+                json_data = json.load(f)
+                if "messages" not in json_data or "participants" not in json_data:
+                    continue
 
-        if not filename.endswith('.html'):
-            continue
+                if len(json_data["participants"]) > 1:
+                    # Ignore group chats
+                    continue
 
-        document = os.path.join(args.file_path, filename)
-        archive = etree.parse(document)
+                for message in json_data["messages"]:
+                    timestamp = message["timestamp"]
+                    if "content" in message and "sender_name" in message:
+                        content = message["content"]
+                        senderName = message["sender_name"]
+                        if senderName != args.own_name:
+                            #print(timestamp, senderName, content)
+                            data += [[timestamp, senderName, senderName, senderName, content]]
 
-        conversationId = filename.replace('.html', '')
-        groupConversation = False
-        timestamp = ''
-        senderName = ''
-        conversationWithName = None
+            '''
+            archive = etree.parse(document)
+            print(len(data))
+            print(document)
 
-        for element in archive.iter():
-            tag = element.tag
-            className = element.get('class')
-            content = element.text
+            conversationId = filename.replace('.html', '')
+            groupConversation = False
+            timestamp = ''
+            senderName = ''
+            conversationWithName = None
 
-            if tag == 'p':
-                text = content
+            for element in archive.iter():
+                tag = element.tag
+                className = element.get('class')
+                content = element.text
 
-                if conversationWithName != '' and senderName != '':
+                if tag == 'p':
+                    text = content
 
-                    # handles when the interlocutor's name changed at some point
-                    if (senderName != conversationWithName) and (senderName != args.own_name) and \
-                            (senderName not in warnedNameChanges) and (not groupConversation):
-                        if senderName not in warnedNameChanges:
-                            print('\t', 'Assuming', senderName, 'is', conversationWithName)
-                            warnedNameChanges.append(senderName)
+                    if conversationWithName != '' and senderName != '':
 
-                        senderName = conversationWithName
+                        # handles when the interlocutor's name changed at some point
+                        if (senderName != conversationWithName) and (senderName != args.own_name) and \
+                                (senderName not in warnedNameChanges) and (not groupConversation):
+                            if senderName not in warnedNameChanges:
+                                print('\t', 'Assuming', senderName, 'is', conversationWithName)
+                                warnedNameChanges.append(senderName)
 
-                    data += [[timestamp, conversationId, conversationWithName, senderName, text]]
+                            senderName = conversationWithName
 
-                else:
-                    nbInvalidSender = nbInvalidSender + 1
+                        data += [[timestamp, conversationId, conversationWithName, senderName, text]]
 
-            elif tag == 'span':
-                if className == 'user':
-                    senderName = content
-                elif className == 'meta':
-                    try:
-                        if not fallbackDateParsing:
-                            timestamp = time.mktime(
-                                pd.to_datetime(content, format='%A, %B %d, %Y at %H:%M%p', exact=False).timetuple())
-                        else:
-                            timestamp = time.mktime(pd.to_datetime(content, infer_datetime_format=True).timetuple())
+                    else:
+                        nbInvalidSender = nbInvalidSender + 1
 
-                    except ValueError:
-                        if not fallbackDateParsing:
-                            print('Unexpected date format. '
-                                  'Falling back to infer_datetime_format, parsing will be slower.')
-                            timestamp = time.mktime(pd.to_datetime(content, infer_datetime_format=True).timetuple())
-                            fallbackDateParsing = True
-                        else:
-                            raise
+                elif tag == 'span':
+                    if className == 'user':
+                        senderName = content
+                    elif className == 'meta':
+                        try:
+                            if not fallbackDateParsing:
+                                timestamp = time.mktime(
+                                    pd.to_datetime(content, format='%A, %B %d, %Y at %H:%M%p', exact=False).timetuple())
+                            else:
+                                timestamp = time.mktime(pd.to_datetime(content, infer_datetime_format=True).timetuple())
 
-            elif tag == 'div' and className == 'thread':
-                nbParticipants = str(element.xpath("text()")).count(', ') + 1
-                if nbParticipants > 1:
-                    groupConversation = True
+                        except ValueError:
+                            if not fallbackDateParsing:
+                                print('Unexpected date format. '
+                                    'Falling back to infer_datetime_format, parsing will be slower.')
+                                timestamp = time.mktime(pd.to_datetime(content, infer_datetime_format=True).timetuple())
+                                fallbackDateParsing = True
+                            else:
+                                raise
 
-            elif tag == 'h3':
-                if conversationWithName is not None:
-                    print('Something is wrong. File format changed? (multiple conversation hearder in a single file)')
-                    exit(0)
-                else:
-                    content = content.replace('Conversation with ', '')
-                    conversationWithName = content
+                elif tag == 'div' and className == 'thread':
+                    nbParticipants = str(element.xpath("text()")).count(', ') + 1
+                    if nbParticipants > 1:
+                        groupConversation = True
 
-                print(conversationId, conversationWithName, "(group?", groupConversation, ")")
+                elif tag == 'h3':
+                    if conversationWithName is not None:
+                        print('Something is wrong. File format changed? (multiple conversation hearder in a single file)')
+                        exit(0)
+                    else:
+                        content = content.replace('Conversation with ', '')
+                        conversationWithName = content
 
-            if len(data) >= args.max_exported_messages:
-                break
+                    print(conversationId, conversationWithName, "(group?", groupConversation, ")")
+
+                if len(data) >= args.max_exported_messages:
+                    break
+            '''
 
     print(len(data), 'messages parsed.')
 

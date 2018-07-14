@@ -72,7 +72,7 @@ def render(data, bin_width, plot_density=False):
                + xlab('Date')
     else:
         plot = ggplot(data, aes(x='datetime', fill='conversationWithName')) \
-               + geom_histogram(alpha=0.6, binwidth=bin_width) \
+               + geom_histogram(alpha=0.6, binwidth=bin_width, position = "stack") \
                + scale_x_date(labels='%b %Y', breaks='6 months') \
                + ggtitle('Message Breakdown') \
                + ylab('Number of Messages') \
