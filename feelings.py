@@ -26,8 +26,15 @@ df3 = df3[df3.text.map(len) > 10]
 
 sid = SentimentIntensityAnalyzer()
 df['sentiment'] = df['text'].apply(lambda x: sid.polarity_scores(x)['compound'])
+friend = df[df.conversationWithName == args.friend_name]
 
 print(args.friend_name)
-print(len(df[df.conversationWithName == args.friend_name]))
+print(len(friend))
 
-print(ggplot(aes(x='sentiment', fill='senderName'), data=df[df.conversationWithName == args.friend_name]) + geom_density(alpha=0.7))
+print(friend)
+
+mf = friend.sort_values('sentiment', ascending=True)
+print(mf)
+
+
+print(ggplot(aes(x='sentiment', fill='senderName'), data=friend) + geom_density(alpha=0.7))
